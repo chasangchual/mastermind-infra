@@ -70,8 +70,8 @@ POSTGRES_PORT=5432
 # MinIO
 MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=<minio_password>
-MINIO_SERVICE_PORT=9001
-MINIO_CONSOLE_PORT=9000
+MINIO_SERVICE_PORT=9000
+MINIO_CONSOLE_PORT=9001
 
 # Neo4j
 NEO4J_DATABASE=neo4j
@@ -80,12 +80,25 @@ NEO4J_PASSWORD=<neo4j_password>
 
 # Redis
 REDIS_PORT=6379
+REDIS_PASSWORD=<redis_password>
 
 # Authentik
 AUTHENTIK_DB=authentik
 AUTHENTIK_SECRET_KEY=<generated_secret_key>
 COMPOSE_PORT_HTTP=9400
 COMPOSE_PORT_HTTPS=9443
+
+# RabbitMQ
+RABBIT_MQ_USER=rabbit_admin
+RABBIT_MQ_PASSWORD=<rabbitmq_password>
+RABBIT_MQ_VHOST=mastermind
+RABBIT_MQ_PORT=5672
+RABBIT_MQ_MANAGEMENT_PORT=15672
+
+# Qdrant
+QDRANT_API_KEY=<qdrant_api_key>
+QDRANT_REST_PORT=6333
+QDRANT_GRPC_PORT=6334
 
 # ClickHouse (Langfuse analytics store)
 CLICKHOUSE_USER=clickhouse
@@ -99,8 +112,10 @@ LANGFUSE_DB=langfuse
 LANGFUSE_SALT=<generated_salt>
 LANGFUSE_ENCRYPTION_KEY=<generated_64_char_hex_key>
 LANGFUSE_NEXTAUTH_SECRET=<generated_secret>
-LANGFUSE_NEXTAUTH_URL=http://localhost:3000
+LANGFUSE_NEXTAUTH_URL=http://localhost:4000
 LANGFUSE_S3_BUCKET=langfuse
+LANGFUSE_WORKER_PORT=3030
+LANGFUSE_WEB_PORT=4000
 ```
 
 ### Generating Secrets
@@ -190,7 +205,7 @@ After startup, access these services:
 | RabbitMQ Management | `http://localhost:15672` | From `.env` |
 | Qdrant API/UI | `http://localhost:6333` | From `.env` |
 | ClickHouse HTTP | `http://localhost:8123` | From `.env` |
-| Langfuse UI | `http://localhost:3000` | Sign up on first run |
+| Langfuse UI | `http://localhost:4000` | Sign up on first run |
 | Airflow UI (full stack) | `http://localhost:8080` | From `.env` |
 | SFTP (full stack) | `localhost:2222` | From `.env` |
 | n8n (n8n stack) | `http://localhost:5678` | N/A |

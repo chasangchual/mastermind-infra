@@ -1,0 +1,4 @@
+<clickhouse>
+    <!-- Docker may not support IPv6; replace the image's IPv6 listener. -->
+    <listen_host replace="replace">0.0.0.0</listen_host>
+</clickhouse>

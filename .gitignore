@@ -1,0 +1,6 @@
+.env
+
+# Runtime data
+airflow/logs/
+data/
+n8n_data/

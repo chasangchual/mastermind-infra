@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 # If AUTHENTIK_DB is not set, default to 'authentik' 
 # or exit with an error so you don't get the "" error.
 : "${AUTHENTIK_DB:=authentik}"
-: "${PERFECT_DB:=prefect}"
 : "${LANGFUSE_DB:=langfuse}"
 
 # 1. Create the Authentik database if it doesn't exist
@@ -23,16 +23,6 @@ EOSQL
 # 3. Install extension in the newly created Authentik database
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$AUTHENTIK_DB" <<-EOSQL
     CREATE EXTENSION IF NOT EXISTS vector;
-EOSQL
-
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
-    SELECT 'CREATE DATABASE "$PERFECT_DB"'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$PERFECT_DB') \gexec
-EOSQL
-
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
-    SELECT 'CREATE DATABASE "$MASTERMIND_DB"'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$MASTERMIND_DB') \gexec
 EOSQL
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
