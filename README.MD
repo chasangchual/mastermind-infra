@@ -7,7 +7,7 @@ This repository provisions a local infrastructure stack for development and test
 ### Core (docker-compose.yml)
 - **PostgreSQL 17 + pgvector** (application database, vector search)
 - **Authentik** (identity provider - server + worker)
-- **MinIO** (S3-compatible object storage)
+- **RustFS** (S3-compatible object storage; `mastermind` and Langfuse buckets created on startup)
 - **Neo4j 5** (graph database)
 - **Redis 7** (caching)
 - **RabbitMQ 4** (message broker)
@@ -17,7 +17,7 @@ This repository provisions a local infrastructure stack for development and test
 
 ### Additional Stacks
 - **docker-compose-full.yml**: Full stack with Airflow, SFTP, Mailserver
-- **docker-compose-db.yml**: Database services only (PostgreSQL, MinIO, Neo4j, Redis)
+- **docker-compose-db.yml**: Database services only (PostgreSQL, Neo4j, Redis)
 - **docker-compose-n8n.yml**: n8n workflow automation
 
 ---
@@ -37,7 +37,7 @@ softwareupdate --install-rosetta
 ## 2. Files
 
 ### docker-compose.yml
-Core services: PostgreSQL, Authentik, MinIO, Neo4j, Redis, RabbitMQ, Qdrant, ClickHouse, Langfuse
+Core services: PostgreSQL, Authentik, RustFS, Neo4j, Redis, RabbitMQ, Qdrant, ClickHouse, Langfuse
 
 ### docker-compose-full.yml
 Full stack including:
@@ -51,8 +51,8 @@ PostgreSQL initialization script that:
 - Enables `vector` extension in the primary database
 - Enables `vector` extension in the Authentik database
 
-### .env
-Environment configuration. Copy from `.env.example` and customize.
+### .env.dev / .env.prod
+Per-environment configuration. Copy from `.env.example` and customize (see [Environments](#environments-dev--prod)).
 
 ---
 
@@ -61,17 +61,22 @@ Environment configuration. Copy from `.env.example` and customize.
 ### Required (.env.example)
 
 ```dotenv
+# Environment
+COMPOSE_PROJECT_NAME=mastermind-dev
+ENV_FILE=.env.dev
+
 # PostgreSQL
 POSTGRES_DB=grit
 POSTGRES_USER=grit-admin
 POSTGRES_PASSWORD=<db_password>
 POSTGRES_PORT=5432
 
-# MinIO
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=<minio_password>
-MINIO_SERVICE_PORT=9000
-MINIO_CONSOLE_PORT=9001
+# RustFS
+RUSTFS_ACCESS_KEY=mastermind
+RUSTFS_SECRET_KEY=<rustfs_secret>
+RUSTFS_SERVICE_PORT=9000
+RUSTFS_CONSOLE_PORT=9001
+RUSTFS_BUCKET=mastermind
 
 # Neo4j
 NEO4J_DATABASE=neo4j
@@ -137,16 +142,70 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 
 ---
 
+## Environments (dev / prod)
+
+Dev and prod share the same `docker-compose.yml`; each has its own env file.
+`COMPOSE_PROJECT_NAME` keeps their containers, network and volumes separate
+(e.g. `mastermind-dev_postgres_data` vs `mastermind-prod_postgres_data`).
+
+### Setup
+
+```bash
+cp .env.example .env.dev
+cp .env.example .env.prod
+```
+
+In `.env.prod` set:
+
+```dotenv
+COMPOSE_PROJECT_NAME=mastermind-prod
+ENV_FILE=.env.prod
+```
+
+and generate **different** secrets for every password/key. If dev and prod run on
+the same host, also change every `*_PORT` in `.env.prod` so they don't collide.
+
+`ENV_FILE` must match the file you pass to `--env-file`; some services load it
+directly via `env_file:`. `.env.dev` and `.env.prod` are gitignored.
+
+### Usage
+
+Pass `--env-file` to **every** compose command:
+
+```bash
+# Dev
+docker compose --env-file .env.dev up -d
+docker compose --env-file .env.dev ps
+docker compose --env-file .env.dev logs -f authentik
+docker compose --env-file .env.dev down
+
+# Prod
+docker compose --env-file .env.prod up -d
+docker compose --env-file .env.prod exec postgresql psql -U mastermind -d mastermind
+docker compose --env-file .env.prod down
+```
+
+Tip: shell aliases avoid forgetting the flag:
+
+```bash
+alias dc-dev='docker compose --env-file .env.dev'
+alias dc-prod='docker compose --env-file .env.prod'
+```
+
+> Plain `docker compose ...` (no `--env-file`) still works with a single `.env` file.
+
+---
+
 ## 4. Quick Start
 
 ### Initial Setup
 
 ```bash
-# Copy environment file
-cp .env.example .env
+# Copy environment file (see Environments section for prod)
+cp .env.example .env.dev
 
-# Edit .env with your values
-nano .env
+# Edit .env.dev with your values
+nano .env.dev
 
 # Create required directories
 mkdir -p ./airflow/dags ./airflow/logs ./airflow/plugins ./sftp_upload
@@ -160,7 +219,7 @@ chmod +x init-db.sh
 
 **Core stack:**
 ```bash
-docker compose up -d
+docker compose --env-file .env.dev up -d
 ```
 
 **With Airflow and additional services:**
@@ -197,8 +256,8 @@ After startup, access these services:
 |---------|----------|---------------------|
 | PostgreSQL | `localhost:5432` | From `.env` |
 | Authentik UI | `http://localhost:9400` | Configure on first run |
-| MinIO API | `http://localhost:9000` | From `.env` |
-| MinIO Console | `http://localhost:9001` | From `.env` |
+| RustFS S3 API | `http://localhost:9000` | From `.env` |
+| RustFS Console | `http://localhost:9001` | From `.env` |
 | Neo4j Browser | `http://localhost:7474` | From `.env` |
 | Neo4j Bolt | `localhost:7687` | From `.env` |
 | Redis | `localhost:6379` | N/A |
@@ -285,7 +344,7 @@ If ports are in use, edit `.env`:
 ```bash
 # Change ports
 POSTGRES_PORT=5433
-MINIO_SERVICE_PORT=9002
+RUSTFS_SERVICE_PORT=9002
 ```
 
 ---
@@ -342,7 +401,7 @@ docker compose -f docker-compose.yml -f docker-compose-n8n.yml up -d
 
 - PostgreSQL pgvector: https://github.com/pgvector/pgvector
 - Authentik: https://goauthentik.io/docs/
-- MinIO: https://min.io/docs/minio/linux/operations/
+- RustFS: https://docs.rustfs.com/
 - Neo4j: https://neo4j.com/docs/
 - Langfuse: https://langfuse.com/docs
 - ClickHouse: https://clickhouse.com/docs
