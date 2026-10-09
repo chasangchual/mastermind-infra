@@ -25,21 +25,24 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:latest
-    # Let Compose generate a project-scoped name to avoid existing /minio conflicts.
+  rustfs:
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    command: server /data --console-address ":9001"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
     ports:
-      # Host ports are configured in .env; MinIO still listens on 9000/9001
-      # inside the Compose network.
-      - "${MINIO_SERVICE_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+      - "127.0.0.1:${RUSTFS_SERVICE_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
+    healthcheck:
+      test: curl -fsS http://127.0.0.1:9000/health
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+      start_interval: 1s
 
   neo4j:
     image: neo4j:5
@@ -172,9 +175,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started # shared minio has no healthcheck, unlike upstream's bundled one
-      langfuse-minio-init:
+      rustfs:
+        condition: service_healthy
+      rustfs-init:
         condition: service_completed_successfully
     environment: &langfuse-env
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgresql:5432/${LANGFUSE_DB}
@@ -191,16 +194,16 @@ services:
       REDIS_AUTH: ${REDIS_PASSWORD}
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET}
       LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://rustfs:9000
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
       LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET}
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
-      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://rustfs:9000
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
 
@@ -214,43 +217,34 @@ services:
       <<: *langfuse-env
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?nextauth secret required}
       # browsers fetch media directly from object storage, so this needs a
-      # host-reachable URL rather than the in-network "minio" hostname above
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${MINIO_SERVICE_PORT}
+      # host-reachable URL rather than the in-network "rustfs" hostname above
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${RUSTFS_SERVICE_PORT:-9000}
 
-  # minio doesn't create S3 buckets on its own; Langfuse needs one to exist
-  # before it starts. One-shot: creates it if missing, then exits.
-  langfuse-minio-init:
+  # rustfs doesn't create buckets on its own. One-shot: creates the mastermind
+  # and Langfuse buckets if missing, then exits.
+  rustfs-init:
     image: minio/mc:latest
     depends_on:
-      minio:
-        condition: service_started
+      rustfs:
+        condition: service_healthy
     restart: "no"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:-mastermind}
       LANGFUSE_S3_BUCKET: ${LANGFUSE_S3_BUCKET}
     entrypoint:
       - /bin/sh
       - -ec
       - |
-        # service_started does not guarantee DNS or API readiness.
-        attempt=1
-        until mc alias set localminio http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
-          if [ "$$attempt" -ge 30 ]; then
-            echo "MinIO initialization failed after 30 attempts; check DNS, connectivity, and credentials." >&2
-            exit 1
-          fi
-          echo "Waiting for MinIO (attempt $$attempt/30)..."
-          attempt=$$((attempt + 1))
-          sleep 2
-        done
-        mc mb --ignore-existing "localminio/$${LANGFUSE_S3_BUCKET}"
+        mc alias set rustfs http://rustfs:9000 "$${RUSTFS_ACCESS_KEY}" "$${RUSTFS_SECRET_KEY}"
+        mc mb --ignore-existing "rustfs/$${RUSTFS_BUCKET}" "rustfs/$${LANGFUSE_S3_BUCKET}"
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.3-alpine
     restart: unless-stopped
     depends_on:
-      langfuse-minio-init:
+      rustfs-init:
         condition: service_completed_successfully
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
@@ -258,7 +252,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     ports:
       - "${CLICKHOUSE_HTTP_PORT}:8123" # HTTP interface
-      - "${CLICKHOUSE_TCP_PORT}:9000"  # native TCP protocol (remapped off 9000, minio already uses it)
+      - "${CLICKHOUSE_TCP_PORT}:9000"  # native TCP protocol (remapped off 9000, rustfs already uses it)
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/ipv4.xml:/etc/clickhouse-server/config.d/zz-ipv4.xml:ro
@@ -272,7 +266,7 @@ volumes:
   rabbitmq_data:
     driver: local
   postgres_data:
-  minio_data:
+  rustfs_data:
   neo4j_data:
   neo4j_logs:
   redis_data:
