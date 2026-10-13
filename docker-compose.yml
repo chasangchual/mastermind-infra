@@ -223,22 +223,31 @@ services:
   # rustfs doesn't create buckets on its own. One-shot: creates the mastermind
   # and Langfuse buckets if missing, then exits.
   rustfs-init:
-    image: minio/mc:latest
+    image: amazon/aws-cli:latest
     depends_on:
       rustfs:
         condition: service_healthy
     restart: "no"
     environment:
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
-      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_PAGER: ""
       RUSTFS_BUCKET: ${RUSTFS_BUCKET:-mastermind}
       LANGFUSE_S3_BUCKET: ${LANGFUSE_S3_BUCKET}
     entrypoint:
       - /bin/sh
       - -ec
       - |
-        mc alias set rustfs http://rustfs:9000 "$${RUSTFS_ACCESS_KEY}" "$${RUSTFS_SECRET_KEY}"
-        mc mb --ignore-existing "rustfs/$${RUSTFS_BUCKET}" "rustfs/$${LANGFUSE_S3_BUCKET}"
+        aws configure set default.s3.addressing_style path
+        for bucket in "$${RUSTFS_BUCKET}" "$${LANGFUSE_S3_BUCKET}"; do
+          exists=$$(aws --endpoint-url http://rustfs:9000 s3api list-buckets \
+            --query "contains(Buckets[].Name, '$${bucket}')" --output text)
+          if [ "$$exists" = "False" ]; then
+            aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket "$$bucket"
+          fi
+        done
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.3-alpine
